@@ -1,0 +1,116 @@
+//MS BUILDINGS 
+var objects = ee.data.listAssets('projects/sat-io/open-datasets/MSBuildings/US/')
+print('Assets in MS Global Buildings Footprint US Folder', objects['assets'])
+  //map
+var feature = ee.FeatureCollection('projects/sat-io/open-datasets/MSBuildings/US/DistrictofColumbia')
+print("features: ", feature.limit(5000))
+var fextent = feature.geometry().convexHull();
+Map.centerObject(feature.first(),15)
+  //how many buildings?
+//print(ee.FeatureCollection('projects/sat-io/open-datasets/MSBuildings/US/DistrictofColumbia').size())
+
+
+
+//Bare Earth Elevation
+var fabdem = ee.ImageCollection("projects/sat-io/open-datasets/GLO-30")
+.filterBounds(fextent);
+print(fabdem.first())
+//print('FABDEM Collection size :',fabdem.size())
+// Use the terrain algorithms to compute a hillshade with 8-bit values.
+var elev = fabdem.mosaic().setDefaultProjection('EPSG:3857',null,30)
+elev.set("system:time_start",ee.Date('2000-01-01').millis());
+var shade = ee.Terrain.hillshade(elev);
+// Create an "ocean" variable to be used for cartographic purposes
+var ocean = elev.lte(0);
+// Create a custom elevation palette from hex strings.
+var elevationPalette = ['006600', '002200', 'fff700', 'ab7634', 'c4d0ff', 'ffffff'];
+// Use these visualization parameters, customized by location.
+var visParams = {min: 1, max: 300, palette: elevationPalette};
+// Create a mosaic of the ocean and the elevation data
+var demvisualized = ee.ImageCollection([
+  // Mask the elevation to get only land
+  elev.mask(ocean.not()).visualize(visParams), 
+  // Use the ocean mask directly to display ocean.
+  ocean.mask(ocean).visualize({palette:'000022'})
+]).mosaic();
+
+
+//DSM - Building/Veg heights
+var glo30 = ee.ImageCollection("projects/sat-io/open-datasets/FABDEM");
+print('glo30', glo30.first())
+//Explanation on setting default Projection here https://twitter.com/jstnbraaten/status/1494038930643042309
+var dsmelev = glo30.mosaic().setDefaultProjection('EPSG:3857',null,30).set("system:time_start",ee.Date('2000-01-01').millis())
+print("DSM Elev: ",dsmelev)
+var dsmelev2 = ee.ImageCollection([dsmelev])
+print('DSMElev2: ', dsmelev2)
+
+// Create an "ocean" variable to be used for cartographic purposes
+var ocean = elev.lte(0);
+// Create a custom elevation palette from hex strings.
+var elevationPalette = ['006600', '002200', 'fff700', 'ab7634', 'c4d0ff', 'ffffff'];
+// Use these visualization parameters, customized by location.
+var visParams = {min: dsmelev.reduceRegion({
+      reducer: ee.Reducer.min(),
+      geometry: fextent,
+      scale : 30
+      }), max: dsmelev.reduceRegion({
+      reducer: ee.Reducer.min(),
+      geometry: fextent,
+      scale : 30
+      }), palette: elevationPalette};
+// Create a mosaic of the ocean and the elevation data
+var dsmvisualized = ee.ImageCollection([
+  // Mask the elevation to get only land
+  dsmelev.mask(ocean.not()).visualize(visParams), 
+  // Use the ocean mask directly to display ocean.
+  ocean.mask(ocean).visualize({palette:'000022'})
+]).mosaic();
+
+
+//Looking at the contents of each polygon
+var result = dsmelev.reduceRegions({
+  collection: fextent,
+  reducer: ee.Reducer.count(),
+  scale: 30,
+  crs: 'EPSG:5070'
+});
+
+print('n pixels', result);
+
+
+//Extract building heights to footprints
+var topo = ee.Image.cat(elev,dsmelev)
+.set('system:time_start', ee.Date('2000-01-01').millis());
+//print('topo', topo)
+// Wrap the single image in an ImageCollection for use in the zonalStats function.
+var topoCol = ee.ImageCollection([topo]);
+print('topoCol: ', topoCol)
+
+
+var func = require('users/WillHKessler/NoiseModel:Functions');
+//print(func.doc)
+
+var params = {
+  bands: [0,1], 
+  bandsRename: ['DEM','DSM']
+};
+var buildings = func.zonalStats(topoCol, feature, params);
+print("Buildings: ",buildings.limit(5000))
+
+print(dsmelev2)
+print(ee.Image(dsmelev2.first()))
+print(ui.Chart.image.histogram(ee.Image(dsmelev2.first()),fextent))
+
+// Order the map layers: 
+//Map.addLayer(fabdem)
+//Map.addLayer(ocean.mask(ocean), {palette:'000022'}, 'ocean', false);
+Map.addLayer(demvisualized.clip(fextent), {}, 'elev palette');
+//Map.addLayer(shade, {}, 'hillshade', false);
+//Map.addLayer(dsmelev.clip(fextent), {}, 'elev palette');
+Map.addLayer(feature.style({fillColor: '00000000',color: '0000FF'}),{},'US/DistrictofColumbia')
+
+
+
+
+
+
